@@ -1,1 +1,82 @@
+default:
+  image: ubuntu:latest
+  services:
+    - postgres:13
+    - redis:6.2
+  cache:
+    key: "$CI_COMMIT_REF_SLUG"
+    paths:
+      - .cache/
+  artifacts:
+    paths:
+      - build/
+    expire_in: 1 week
+
+variables:
+  DEPLOY_ENV:
+    value: "staging"
+    options:
+      - "dev"
+      - "staging"
+      - "prod"
+  AWS_REGION: "us-west-2"
+  DB_HOST: "postgres"
+
+workflow:
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "main"'
+    - if: '$CI_COMMIT_TAG'
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+      when: never
+    - if: '$CI_COMMIT_REF_NAME =~ /^hotfix\//'
+      when: always
+    - if: '$DEPLOY_ENV == "prod"'
+      when: manual
+    - if: '$CI_COMMIT_MESSAGE =~ /\[skip ci\]/i'
+      when: never
+      
+include:
+  - template: Security/SAST.gitlab-ci.yml
+  - local: .gitlab-ci/includes/build.yml
+  - project: "shared-ci-templates"
+    file: "templates/deploy.yml"
+    ref: master
+
+stages:
+  - setup
+  - build
+  - test
+  - deploy
+
+setup:
+  stage: setup
+  script:
+    - echo "Initializing environment..."
+  artifacts:
+    paths:
+      - .env
+
+deploy:
+  stage: deploy
+  script:
+    - echo "Deploying to $DEPLOY_ENV"
+  environment:
+    name: $DEPLOY_ENV
+    url: "https://$DEPLOY_ENV.example.com"
+  when: manual
+
+trigger_child_pipeline:
+  stage: deploy
+  trigger:
+    include:
+      - local: .gitlab-ci/includes/child-pipeline.yml
+    strategy: depend
+
+parallel_tests:
+  stage: test
+  script:
+    - echo "Running parallel tests..."
+  parallel:
+    matrix:
+      - TEST_SUITE: ["unit", "integration", "e2e"]
 
